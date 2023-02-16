@@ -403,10 +403,10 @@ def test_ngram_class():
     ]
 
     # Build an empty ngram model.
-    NgramModel()
+    NgramModel([])  # TODO: change test when allowing empty models
 
     # Build a simple ngram model, than train it with different parameters.
-    model = NgramModel(2, 1, sequences=words)
+    model = NgramModel(words, 2, 1)
 
     # Assert that an error will be raised if we try to score a sequence
     # before training the model.
@@ -417,7 +417,7 @@ def test_ngram_class():
     # Run different trainings.
     model.train()
     model.train(method="lidstone", gamma=0.1)
-    model.train(method="certaintydegree", set_min=True)
+    model.train(method="certaintydegree")
     model.train(normalize=True)
 
     # Compute the relative likelihood for a random sample of `words`, both

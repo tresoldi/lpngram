@@ -1,8 +1,8 @@
 """
-Modules providing methods for generating and collecting ngrams.
+Modules providing methods for generating and collecting n-grams.
 
 The methods allow to collect different kind of subsequences, such as standard
-ngrams (preceding context), skipngrams with both single or multiple gap
+ngrams (preceding context), skip n-grams with both single or multiple gap
 openings (both preceding and following context), and positional ngrams (both
 preceding and following context).
 """
@@ -11,6 +11,7 @@ preceding and following context).
 from collections import defaultdict, Counter
 from functools import partial
 from itertools import chain, combinations, product
+from typing import *
 import math
 import random
 
@@ -18,24 +19,31 @@ import random
 from .smoothing import smooth_dist
 
 # Global padding symbol, shared across all functions/class-methods.
+# TODO: move to some global module? along with functions like _seq_as_tuple?
 _PAD_SYMBOL = "$$$"
 _ELM_SYMBOL = "###"
 
 
-def _seq_as_tuple(sequence):
+# TODO: allow an optional set of delimiters for splitting strings
+def _seq_as_tuple(sequence: Union[Sequence[str], str]) -> Tuple[str]:
     """
-    Internal function for automatically converting a string sequence to a
-    tuple, if needed.
+    Internal function for converting a sequence to a tuple.
+
+    This function is used to convert a sequence to a tuple, which is the
+    preferred datatype for ngram keys. If the input is a string, it is
+    converted to a tuple of strings, splitting the string by spaces if
+    spaces are found (thus assuming it is a list of words). If the input is
+    already a list, it is converted to a tuple.
 
     Parameters
     ----------
     sequence: list or str
-        The sequence that shall be converted into an iterable.
+        A sequence to be converted to a tuple.
 
     Returns
     -------
-    out: tuple
-        A tuple of the sequence.
+    tuple
+        A tuple with the same elements as the input sequence.
     """
 
     # We first check for datatype and then for a space, as the first test is
@@ -54,47 +62,47 @@ class NgramModel:
     models, such as sequence relative likelihood computation (both per state
     and overall), random sequence generation, computation of a model entropy
     and of cross-entropy/perplexity of a sequence, etc. As model training is
-    computationally and time consuming for large datasets, trained models can
+    computationally and time-consuming for large datasets, trained models can
     be saved and loaded ("serialized") from disk.
     """
 
+    # TODO: make `sequences` optional, allowing to initialize an empty model
+    # TODO: make accept Hashable instead of str
     def __init__(
-        self, pre_order=0, post_order=0, pad_symbol=_PAD_SYMBOL, sequences=None
+        self,
+        sequences: Sequence[Sequence[str]],
+        pre_order: Union[int, List[int]] = 0,
+        post_order: Union[int, List[int]] = 0,
+        pad_symbol: str = _PAD_SYMBOL,
     ):
         """
         Initialize an NgramModel object.
 
         Parameters
         ----------
-        pre-orders: int or list
+        sequences:
+            A list of sequences to be added to the model.
+        pre_order: int or list
             An integer with the maximum length of the preceding context or a
             list with all preceding context lengths to be collected. If an
             integer is passed, all lengths from zero to the informed one will
             be collected. Defaults to 0, meaning that no left-context
             information will be collected.
-
-        post-orders: int or list
+        post_order: int or list
             An integer with the maximum length of the following context or a
             list with all following context lengths to be collected. If an
             integer is passed, all lengths from zero to the informed one will
             be collected. Defaults to 0, meaning that no right-context
             information will be collected.
-
-        pad_symbol: object
+        pad_symbol: str
             An optional symbol to be used as start-of- and end-of-sequence
             boundaries. The same symbol is used for both boundaries. Must be a
             value different from None, defaults to "$$$".
-
-        sequences: list
-            An optional list of sequences for ngram collection. If both a model
-            file and a list of sequences are provided, the sequences will be
-            appended to the object after loading the model, clearing any
-            previous training.
         """
 
         # Store the ngram collection parameters. While the user can pass
         # `pre_order` and `post_order` as integers (indicating the maximum
-        # order) or lists (allowing to specify discontinuous distirbutions),
+        # order) or lists (allowing to specify discontinuous distributions),
         # just as in the functions for collecting ngrams, we are already
         # casting the range iterators to lists here, so we can quickly query
         # the values; this is necessary, for example, for random sequence
@@ -135,7 +143,7 @@ class NgramModel:
         # Add the user-provided sequences, concluding initialization.
         self.add_sequences(sequences)
 
-    def add_sequences(self, sequences):
+    def add_sequences(self, sequences: Sequence[Sequence[str]]):
         """
         Adds sequences to a model, collecting their ngrams.
 
@@ -147,7 +155,7 @@ class NgramModel:
 
         Parameters
         ----------
-        sequences: list
+        sequences: list of lists
             A list of sequences to be added to the model.
         """
 
@@ -155,7 +163,7 @@ class NgramModel:
             # Either initialize (if no model file was provided) or clear (if
             # a model file was provided) the variables for smoothed
             # probabilities. This is performed inside the conditional check
-            # to guarantee that we don't loose any previsous training if there
+            # to guarantee that we don't lose any previous training if there
             # is not reason for that (i.e., if no new sequences are added).
             self._p = {}
             self._p0 = {}
@@ -176,7 +184,14 @@ class NgramModel:
             # Collect sequence lengths.
             self._seqlens.update([len(sequence) for sequence in sequences])
 
-    def train(self, method="laplace", normalize=False, bins=None, **kwargs):
+    # TODO: make method mandatory, without laplace default
+    def train(
+        self,
+        method: str = "laplace",
+        normalize: bool = False,
+        bins: int = None,
+        **kwargs
+    ):
         """
         Train a model after ngrams have been collected.
 
@@ -191,7 +206,6 @@ class NgramModel:
             `smooth_dist()`. Either "uniform", "random", "mle", "lidstone",
             "laplace", "ele", "wittenbell", "certaintydegree", or "sgt".
             Defaults to "laplace".
-
         normalize: boolean
             Whether to normalize the log-probabilities for each ngram in the
             model after smoothing, i.e., to guarantee that the probabilities
@@ -206,7 +220,6 @@ class NgramModel:
             entropy/perplexity of a sequence, are needed (such as for
             publication), as they will be more in line with what is generally
             expected and will facilitate the comparison of different models.
-
         bins: int
             The number of bins to be assumed when smoothing, for the smoothing
             methods that use this information. Defaults to the number of
@@ -279,7 +292,7 @@ class NgramModel:
         # Internally inform that the model was trained.
         self._trained = True
 
-    def state_score(self, sequence):
+    def state_score(self, sequence: Sequence[str]) -> List[float]:
         """
         Returns the relative likelihood for each state in a sequence.
 
@@ -350,7 +363,7 @@ class NgramModel:
 
         return s_prob
 
-    def score(self, sequence, use_length=True):
+    def score(self, sequence: Sequence[str], use_length=True) -> float:
         """
         Returns the relative likelihood of a sequence.
 
@@ -360,7 +373,6 @@ class NgramModel:
         ----------
         sequence: list
             A list of states to be scored.
-
         use_length: bool
             Whether to correct the sequence relative likelihood by using
             length probability. Defaults to True.
@@ -387,11 +399,11 @@ class NgramModel:
         return _prob
 
     # TODO: should we cache this, too? Or rewrite using some iteration tool?
-    def model_entropy(self):
+    def model_entropy(self) -> float:
         """
         Return the model entropy.
 
-        This methods collects the P x log(P) for all contexts, returning
+        This method collects the P x log(P) for all contexts, returning
         their sum. This is different from a sequence cross-entropy,
         and should be used to estimate the complexity of a model.
 
@@ -417,7 +429,7 @@ class NgramModel:
 
         return sum(lentropy)
 
-    def entropy(self, sequence, base=2.0):
+    def entropy(self, sequence: Sequence[str], base: float = 2.0) -> float:
         """
         Calculates the cross-entropy of a sequence.
 
@@ -425,7 +437,6 @@ class NgramModel:
         ----------
         sequence: list
             The sequence whose cross-entropy will be calculated.
-
         base: float
             The logarithmic base for the cross-entropy calculation. Defaults to
             2.0, following the standard approach set by Shannon that allows
@@ -439,7 +450,7 @@ class NgramModel:
         """
         return -(self.score(sequence) / math.log(base)) / len(sequence)
 
-    def perplexity(self, sequence):
+    def perplexity(self, sequence: Sequence[str]) -> float:
         """
         Calculates the perplexity of a model.
 
@@ -458,14 +469,36 @@ class NgramModel:
         """
         return 2.0 ** self.entropy(sequence)
 
-    def _gen_single_rnd_seq(self, seq_len, cutoff_length, scale, tries=10):
+    # TODO: deal with returning None
+    # TODO: should yield be used here?
+    def _gen_single_rnd_seq(
+        self, seq_len: int, cutoff_length: int, scale: float, tries: int = 10
+    ) -> Optional[List[str]]:
         """
         Internal function for random sequence generation.
 
         This function is intended for internal usage; for generating a single
         random sequence, use the standard `self._random_seq()` function
         with a `k` parameter of 1.
+
+        Parameters
+        ----------
+        seq_len: int
+            The length of the sequence to be generated.
+        cutoff_length: int
+            The minimum length of the sequence to be generated.
+        scale: float
+            The scale parameter for the random sequence generation.
+        tries: int
+            The number of attempts to generate a sequence with the given
+            length. Defaults to 10.
+
+        Returns
+        -------
+        rnd_seq: list
+            A list of states, representing the generated random sequence.
         """
+
         # Set the initial state for the random sequence, which is just the
         # pad symbol times the maximum preceding order.
         rnd_seq = (self._padsymbol,) * max(self._pre)
@@ -565,11 +598,18 @@ class NgramModel:
                 # sequence, let's exit the loop and the return the random
                 # sequence.
                 if len(rnd_seq) == seq_len:
-                    return rnd_seq
+                    return list(rnd_seq)
 
+    # TODO: tries/attempts naming
     def random_seqs(
-        self, k=1, seq_len=None, scale=2, only_longest=False, attempts=10, seed=None
-    ):
+        self,
+        k: int = 1,
+        seq_len: int = None,
+        scale: float = 2.0,
+        only_longest: bool = False,
+        attempts: int = 10,
+        seed: Hashable = None,
+    ) -> List[List[str]]:
         """
         Return a set of random sequences based in the observed transition
         frequencies.
@@ -589,21 +629,18 @@ class NgramModel:
             is no guarantee that the desired number or even that a single
             random sequence will be returned. In case of missing sequences, try
             increasing the parameter `attempts`.
-
         seq_len: int or list
             An optional integer with length of the sequences to be generated or
             a list of lengths to be uniformly drawn for the generated
             sequences. If the parameter is not specified, the length of the
             sequences will be drawn by the sequence lengths observed in
             training according to their frequencies.
-
         scale: numeric
             The exponent used for weighting ngram probabilities according to
             their length in number of states. The higher this value, the less
             likely the algorithm will be to drawn shorter ngrams, which
             contribute to a higher variety in words but can also result in less
             likely sequences. Defaults to 2.
-
         only_longest: bool
             Whether the algorithm should only collect the longest possible
             ngrams when computing the search space from which each new random
@@ -611,13 +648,11 @@ class NgramModel:
             in the generated sequences and a longer searching time, which might
             need to be increased via the `attempts` parameters. Defaults to
             False.
-
-        tries: int
+        attempts: int
             The number of times the algorithm will try to generate a random
             sequence. If the algorithm is unable to generate a suitable random
             sequence after the specified number of `attempts`, the loop will
             advance to the following sequence (if any). Defaults to 10.
-
         seed: obj
             Any hasheable object, used to feed the random number generator and
             thus reproduce the generated set of random sequences.
@@ -683,7 +718,9 @@ class NgramModel:
 # value for the order, so that users won't confuse a given order to all
 # orders up to and including the given one.
 # TODO: rename to `collect_ngrams`
-def get_n_ngrams(sequence, order, pad_symbol=_PAD_SYMBOL):
+def get_n_ngrams(
+    sequence: Sequence[str], order: int, pad_symbol: Optional[str] = _PAD_SYMBOL
+):
     """
     Build an iterator for collecting all ngrams of a given order.
 
@@ -694,10 +731,8 @@ def get_n_ngrams(sequence, order, pad_symbol=_PAD_SYMBOL):
     ----------
     sequence: list or str
         The sequence from which the ngrams will be collected.
-
     order: int
         The order of the ngrams to be collected.
-
     pad_symbol: object
         An optional symbol to be used as start-of- and end-of-sequence
         boundaries. The same symbol is used for both boundaries. Must be a
@@ -722,7 +757,7 @@ def get_n_ngrams(sequence, order, pad_symbol=_PAD_SYMBOL):
     ('ongoing', 'fighting')
     ('fighting', '$$$')
 
-    >>> for ngram in lpngrmam.get_n_ngrams(sent, 1):
+    >>> for ngram in lpngram.get_n_ngrams(sent, 1):
     ...     print(ngram)
     ...
     ('Insurgents',)
@@ -764,7 +799,9 @@ def get_n_ngrams(sequence, order, pad_symbol=_PAD_SYMBOL):
 
 
 # TODO: rename to `collect` as above
-def get_all_ngrams_by_order(sequence, orders=None, pad_symbol=_PAD_SYMBOL):
+def get_all_ngrams_by_order(
+    sequence: Sequence[str], orders: Optional[int] = None, pad_symbol: str = _PAD_SYMBOL
+):
     """
     Build an iterator for collecting all ngrams of a given set of orders.
 
@@ -775,13 +812,11 @@ def get_all_ngrams_by_order(sequence, orders=None, pad_symbol=_PAD_SYMBOL):
     ----------
     sequence: list or str
         The sequence from which the ngrams will be collected.
-
     orders: list
         An optional list of the orders of the ngrams to be collected. Can be
         larger than the length of the sequence, in which case the latter will
         be padded accordingly if requested. Defaults to the collection of all
         possible ngrams in the sequence with the minimum padding.
-
     pad_symbol: object
         An optional symbol to be used as start-of- and end-of-sequence
         boundaries. The same symbol is used for both boundaries. Must be a
@@ -825,7 +860,13 @@ def get_all_ngrams_by_order(sequence, orders=None, pad_symbol=_PAD_SYMBOL):
 
 
 # TODO: rename to `collect` as above
-def get_skipngrams(sequence, order, max_gaps, pad_symbol=_PAD_SYMBOL, single_gap=True):
+def get_skipngrams(
+    sequence: Sequence[str],
+    order: int,
+    max_gaps: int,
+    pad_symbol: str = _PAD_SYMBOL,
+    single_gap: bool = True,
+):
     """
     Build an iterator for collecting all skip ngrams of a given length.
 
@@ -841,20 +882,16 @@ def get_skipngrams(sequence, order, max_gaps, pad_symbol=_PAD_SYMBOL, single_gap
         "None" as an element, as it is used as a sentinel during skip ngram
         collection following the implementation offered by Bird et al. 2018
         (NLTK), which is a de facto standard.
-
     order: int
         The order of the ngrams to be collected (parameter "n" in Guthrie et
         al. 2006).
-
     max_gaps: int
         The maximum number of gaps in the ngrams to be collected (parameter "k"
         in Guthrie et al. 2006).
-
     pad_symbol: object
         An optional symbol to be used as start-of- and end-of-sequence
         boundaries. The same symbol is used for both boundaries. Must be a
         value different from None, defaults to "$$$".
-
     single_gap: boolean
         An optional logic value indicating if multiple gap openings are to be
         allowed, as in Guthrie et al. (2006) and Bird et al. (2018), or if at
@@ -946,7 +983,7 @@ def get_skipngrams(sequence, order, max_gaps, pad_symbol=_PAD_SYMBOL, single_gap
         #       it when yielding; while expansive, this is still more effective
         #       (and clear) than other solutions which would not allow using
         #       `all()` for most sequence computations.
-        _temp = chain(seq, (None,) * order)
+        _temp = list(chain(seq, (None,) * order))
         for ngram in get_n_ngrams(_temp, order + max_gaps, pad_symbol=None):
             head = ngram[:1]  # cache for all combinations
             for comb in [
@@ -990,7 +1027,11 @@ def get_skipngrams(sequence, order, max_gaps, pad_symbol=_PAD_SYMBOL, single_gap
 
 # TODO: renamte to `collect` as above
 def get_posngrams(
-    sequence, pre_order=0, post_order=0, pad_symbol=_PAD_SYMBOL, elm_symbol=_ELM_SYMBOL
+    sequence: Sequence[str],
+    pre_order: int = 0,
+    post_order: int = 0,
+    pad_symbol: Optional[str] = _PAD_SYMBOL,
+    elm_symbol: Optional[str] = _ELM_SYMBOL,
 ):
     """
     Build an iterator for collecting all positional ngrams of a sequence.
@@ -1047,7 +1088,7 @@ def get_posngrams(
     (('in', 'ongoing', '###', '$$$'), 'fighting', 4)
     """
 
-    # Cache the complexive order for the ngram from the sum of the pre- and
+    # Cache the final order for the ngram from the sum of the pre- and
     # post- orders (with an additional one, the state under actual
     # observation).
     order = pre_order + 1 + post_order
@@ -1064,7 +1105,7 @@ def get_posngrams(
         seq = tuple(seq)
 
     # We obtain all the subsequences of the order we desire by asking for all
-    # the ngrams of the given order when the sequence is not addionally padded
+    # the ngrams of the given order when the sequence is not additionally padded
     # (of course, it will already have been padded, if the user so requested,
     # by this time).
     subseqs = get_n_ngrams(seq, order, pad_symbol=None)
@@ -1085,9 +1126,13 @@ def get_posngrams(
         )
 
 
-## TODO: renamte to `collect` as above
+# TODO: renamte to `collect` as above
 def get_all_posngrams(
-    sequence, pre_orders, post_orders, pad_symbol=_PAD_SYMBOL, elm_symbol=_ELM_SYMBOL
+    sequence: Sequence[str],
+    pre_orders: Union[int, List[int]],
+    post_orders: Union[int, List[int]],
+    pad_symbol: Optional[str] = _PAD_SYMBOL,
+    elm_symbol: Optional[str] = _ELM_SYMBOL,
 ):
     """
     Build an iterator for collecting all positional ngrams of a sequence.
@@ -1102,22 +1147,18 @@ def get_all_posngrams(
     ----------
     sequence: list or str
         The sequence from which the ngrams will be collected.
-
-    pre-orders: int or list
+    pre_orders: int or list
         An integer with the maximum length of the preceding context or a list
         with all preceding context lengths to be collected. If an integer is
         passed, all lengths from zero to the informed one will be collected.
-
-    post-orders: int or list
+    post_orders: int or list
         An integer with the maximum length of the following context or a list
         with all following context lengths to be collected. If an integer is
         passed, all lengths from zero to the informed one will be collected.
-
     pad_symbol: object
         An optional symbol to be used as start-of- and end-of-sequence
         boundaries. The same symbol is used for both boundaries. Must be a
         value different from None, defaults to "$$$".
-
     elm_symbol: object
         An optional symbol to be used as transition symbol replacement in the
         context tuples (the first element in the returned iterator). Defaults
@@ -1162,7 +1203,7 @@ def get_all_posngrams(
     # We don't need to convert `sequence` into a tuple or pad it here, as this
     # will be performed by `get_posngrams()`. While we could do this in advance
     # and cache the results, this complicates things a bit and a quick
-    # experimentation showed no real improvement in perfomance, even when
+    # experimentation showed no real improvement in performance, even when
     # simulating with large datasets (we'd still need to perform a conditional
     # check on the sequence type in order to profit from the cache, which is
     # expensive and is otherwise performed internally by C-code).
@@ -1201,7 +1242,6 @@ bigrams.__doc__ = """
     ----------
     sequence: list or str
         The sequence from which the bigrams will be collected.
-
     pad_symbol: object
         An optional symbol to be used as start-of- and end-of-sequence
         boundaries. The same symbol is used for both boundaries. Must be a
@@ -1238,7 +1278,6 @@ trigrams.__doc__ = """
     ----------
     sequence: list or str
         The sequence from which the trigrams will be collected.
-
     pad_symbol: object
         An optional symbol to be used as start-of- and end-of-sequence
         boundaries. The same symbol is used for both boundaries. Must be a
@@ -1276,7 +1315,6 @@ fourgrams.__doc__ = """
     ----------
     sequence: list or str
         The sequence from which the fourgrams will be collected.
-
     pad_symbol: object
         An optional symbol to be used as start-of- and end-of-sequence
         boundaries. The same symbol is used for both boundaries. Must be a
@@ -1306,7 +1344,8 @@ fourgrams.__doc__ = """
 
 
 # TODO: rename to `collect ` as above
-def get_all_ngrams(sequence, sort=False):
+# TODO: sort also alphabetically
+def get_all_ngrams(sequence: Sequence[str], sort: bool = False) -> List[str]:
     """
     Function returns all possible n-grams of a given sequence.
 
@@ -1314,6 +1353,8 @@ def get_all_ngrams(sequence, sort=False):
     ----------
     sequence : list or str
         The sequence that shall be converted into it's ngram-representation.
+    sort : bool
+        If set to True, the ngrams will be sorted in decreasing order of length.
 
     Returns
     -------
